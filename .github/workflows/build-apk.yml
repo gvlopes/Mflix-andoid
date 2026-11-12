@@ -32,14 +32,23 @@ jobs:
 
       - name: Encontrar projeto Android
         run: |
+          echo "===== ARQUIVOS EXTRAÍDOS ====="
+          find extracted -maxdepth 5 -type f | head -100
+
+          echo "===== PROCURANDO GRADLE ====="
+          find extracted -type f \( -name gradlew -o -name gradlew.bat -o -name settings.gradle -o -name settings.gradle.kts \)
+
           WRAPPER=$(find extracted -type f -name gradlew | head -n 1)
+
           if [ -z "$WRAPPER" ]; then
             echo "ERRO: gradlew não encontrado no ZIP"
             exit 1
           fi
+
           DIR=$(dirname "$WRAPPER")
           echo "PROJECT_DIR=$DIR" >> $GITHUB_ENV
           chmod +x "$WRAPPER"
+
 
       - name: Compilar APK
         run: |
