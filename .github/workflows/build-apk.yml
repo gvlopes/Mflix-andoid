@@ -1,0 +1,52 @@
+
+name: Gerar APK MXFlix
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Baixar projeto
+        uses: actions/checkout@v4
+
+      - name: Configurar Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Preparar Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Extrair ZIP
+        run: |
+          mkdir extracted
+          unzip -q MXFlix-android.zip -d extracted
+
+      - name: Encontrar projeto Android
+        run: |
+          WRAPPER=$(find extracted -type f -name gradlew | head -n 1)
+          if [ -z "$WRAPPER" ]; then
+            echo "ERRO: gradlew não encontrado no ZIP"
+            exit 1
+          fi
+          DIR=$(dirname "$WRAPPER")
+          echo "PROJECT_DIR=$DIR" >> $GITHUB_ENV
+          chmod +x "$WRAPPER"
+
+      - name: Compilar APK
+        run: |
+          cd "$PROJECT_DIR"
+          ./gradlew assembleDebug
+
+      - name: Disponibilizar APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: MXFlix-APK
+          path: extracted/**/build/outputs/apk/debug/*.apk
+          if-no-files-found: error
