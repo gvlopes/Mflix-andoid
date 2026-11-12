@@ -28,7 +28,7 @@ jobs:
       - name: Extrair ZIP
         run: |
           mkdir extracted
-          unzip -q MXFlix-android.zip -d extracted
+          unzip -q MXFlix-Android.zip -d extracted
 
       - name: Encontrar projeto Android
         run: |
