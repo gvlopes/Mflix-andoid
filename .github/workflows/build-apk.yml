@@ -12,29 +12,30 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      # 1. Baixar arquivos do GitHub
+      # 1. Baixar projeto do GitHub
       - name: Baixar projeto
         uses: actions/checkout@v4
 
-      # 2. Configurar Java
+      # 2. Configurar Java 17
       - name: Configurar Java
         uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '17'
 
-      # 3. Preparar Android SDK
+      # 3. Configurar Android SDK
       - name: Preparar Android SDK
         uses: android-actions/setup-android@v4
 
+      # 4. Instalar ferramentas Android
       - name: Instalar ferramentas Android
         run: |
-          sdkmanager "platforms;android-35" \
-            "build-tools;35.0.0" \
-            "platform-tools"
+          sdkmanager "platform-tools" \
+            "platforms;android-35" \
+            "build-tools;35.0.0"
 
-      # 4. Encontrar e extrair ZIP
-      - name: Extrair projeto HarpiaPlay
+      # 5. Encontrar e extrair ZIP
+      - name: Extrair HarpiaPlay
         shell: bash
         run: |
           mkdir -p extracted
@@ -49,46 +50,64 @@ jobs:
             exit 1
           fi
 
-          echo "ZIP encontrado: $ZIP_FILE"
+          echo "Arquivo encontrado: $ZIP_FILE"
 
           unzip -q "$ZIP_FILE" -d extracted
 
-      # 5. Localizar projeto Gradle
+      # 6. Localizar projeto Android
       - name: Encontrar projeto Android
         shell: bash
         run: |
-          APP_DIR=$(find extracted -type f \
-            -name settings.gradle \
-            -print -quit | xargs dirname)
+          SETTINGS=$(find extracted -type f \
+            -name settings.gradle -print -quit)
 
-          if [ -z "$APP_DIR" ] || \
-             [ ! -f "$APP_DIR/app/build.gradle" ]; then
-            echo "ERRO: Projeto Android não encontrado."
+          if [ -z "$SETTINGS" ]; then
+            echo "ERRO: settings.gradle não encontrado."
             find extracted -maxdepth 4 -type f
             exit 1
           fi
 
-          echo "Projeto encontrado: $APP_DIR"
+          APP_DIR=$(dirname "$SETTINGS")
+
+          if [ ! -f "$APP_DIR/app/build.gradle" ]; then
+            echo "ERRO: app/build.gradle não encontrado."
+            exit 1
+          fi
+
+          echo "Projeto localizado: $APP_DIR"
           echo "APP_DIR=$APP_DIR" >> "$GITHUB_ENV"
 
-      # 6. Preparar Gradle
+      # 7. Preparar Gradle
       - name: Preparar Gradle
         run: |
           cd "$APP_DIR"
           chmod +x gradlew
 
-      # 7. Compilar APK Release
+      # 8. Compilar APK Debug assinado
       - name: Compilar APK
         run: |
           cd "$APP_DIR"
-          ./gradlew assembleRelease --no-daemon
+          ./gradlew clean assembleDebug --no-daemon
 
-      # 8. Disponibilizar APK
+      # 9. Verificar APK
+      - name: Verificar APK
+        run: |
+          APK="$APP_DIR/app/build/outputs/apk/debug/app-debug.apk"
+
+          if [ ! -f "$APK" ]; then
+            echo "ERRO: APK não foi gerado."
+            find "$APP_DIR/app/build/outputs" -type f
+            exit 1
+          fi
+
+          echo "APK gerado com sucesso!"
+          ls -lh "$APK"
+
+      # 10. Disponibilizar APK
       - name: Disponibilizar APK
         uses: actions/upload-artifact@v4
         with:
-          name: HarpiaPlay-APK
-          path: ${{ env.APP_DIR }}/app/build/outputs/apk/release/*.apk
+          name: HarpiaPlay-APK-Instalavel
+          path: ${{ env.APP_DIR }}/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
           retention-days: 7
-
