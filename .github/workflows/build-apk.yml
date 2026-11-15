@@ -51,6 +51,7 @@ jobs:
         run: |
           cd "$APP"
           npm install
+          npm install expo-asset@~11.0.1 expo-constants@~17.0.3 expo-font@~13.0.1
 
       - name: Compilar APK
         id: g1
