@@ -53,11 +53,12 @@ jobs:
           npm install
           npm install expo-asset@~11.0.1 expo-constants@~17.0.3 expo-font@~13.0.1
 
-      - name: Compilar APK
+       - name: Compilar APK
         id: g1
         continue-on-error: true
         run: |
           cd "$APP/android"
+          echo "android.kotlinVersion=1.9.25" >> gradle.properties
           chmod +x gradlew
           ./gradlew assembleRelease --no-daemon
 
@@ -67,6 +68,7 @@ jobs:
           cd "$APP"
           npx expo prebuild -p android --clean
           cd android
+          echo "android.kotlinVersion=1.9.25" >> gradle.properties
           chmod +x gradlew
           ./gradlew assembleRelease --no-daemon
 
