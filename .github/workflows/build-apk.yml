@@ -14,6 +14,11 @@ jobs:
       - name: Baixar projeto
         uses: actions/checkout@v4
 
+      - name: Configurar Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
       - name: Configurar Java
         uses: actions/setup-java@v4
         with:
@@ -22,42 +27,49 @@ jobs:
 
       - name: Preparar Android SDK
         uses: android-actions/setup-android@v3
-        with:
-          packages: 'platform-tools'
 
       - name: Extrair ZIP
         run: |
-          mkdir extracted
-          unzip -q MXFlix-Android.zip -d extracted
+          mkdir -p extracted
+          unzip -q -o MXFlix-Android.zip -d extracted
 
-      - name: Encontrar projeto Android
+      - name: Encontrar projeto
         run: |
-          echo "===== ARQUIVOS EXTRAÍDOS ====="
-          find extracted -maxdepth 5 -type f | head -100
-
-          echo "===== PROCURANDO GRADLE ====="
-          find extracted -type f \( -name gradlew -o -name gradlew.bat -o -name settings.gradle -o -name settings.gradle.kts \)
-
-          WRAPPER=$(find extracted -type f -name gradlew | head -n 1)
-
-          if [ -z "$WRAPPER" ]; then
-            echo "ERRO: gradlew não encontrado no ZIP"
+          PKG=$(find extracted -path '*/mobile/package.json' -not -path '*/node_modules/*' | head -n 1)
+          if [ -z "$PKG" ]; then
+            echo "ERRO: mobile/package.json não encontrado no ZIP"
+            find extracted -maxdepth 4 | head -50
             exit 1
           fi
+          APP=$(dirname "$PKG")
+          echo "APP=$APP" >> $GITHUB_ENV
+          echo "Projeto em: $APP"
 
-          DIR=$(dirname "$WRAPPER")
-          echo "PROJECT_DIR=$DIR" >> $GITHUB_ENV
-          chmod +x "$WRAPPER"
-
+      - name: Instalar dependências
+        run: |
+          cd "$APP"
+          npm install
 
       - name: Compilar APK
+        id: g1
+        continue-on-error: true
         run: |
-          cd "$PROJECT_DIR"
-          ./gradlew assembleDebug
+          cd "$APP/android"
+          chmod +x gradlew
+          ./gradlew assembleRelease --no-daemon
+
+      - name: Plano B - regenerar Android com Expo
+        if: steps.g1.outcome == 'failure'
+        run: |
+          cd "$APP"
+          npx expo prebuild -p android --clean
+          cd android
+          chmod +x gradlew
+          ./gradlew assembleRelease --no-daemon
 
       - name: Disponibilizar APK
         uses: actions/upload-artifact@v4
         with:
           name: MXFlix-APK
-          path: extracted/**/build/outputs/apk/debug/*.apk
+          path: ${{ env.APP }}/android/app/build/outputs/apk/release/*.apk
           if-no-files-found: error
