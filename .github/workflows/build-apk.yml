@@ -1,5 +1,5 @@
 
-name: Gerar APK MXFlix
+name: Gerar APK HarborPlay
 
 on:
   workflow_dispatch:
@@ -31,7 +31,7 @@ jobs:
       - name: Extrair ZIP
         run: |
           mkdir -p extracted
-          unzip -q -o MXFlix-Android.zip -d extracted
+          unzip -q -o HarborPlay-Android.zip -d extracted
 
       - name: Encontrar projeto
         run: |
@@ -75,6 +75,6 @@ jobs:
       - name: Disponibilizar APK
         uses: actions/upload-artifact@v4
         with:
-          name: MXFlix-APK
+          name: Harpia-APK
           path: ${{ env.APP }}/android/app/build/outputs/apk/release/*.apk
           if-no-files-found: error
