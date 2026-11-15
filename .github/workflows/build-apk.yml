@@ -9,72 +9,108 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+      # 1. Baixar arquivos do repositório
       - name: Baixar projeto
         uses: actions/checkout@v4
 
+      # 2. Configurar Node.js
       - name: Configurar Node
         uses: actions/setup-node@v4
         with:
           node-version: 20
 
+      # 3. Configurar Java
       - name: Configurar Java
         uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '17'
 
+      # 4. Preparar Android SDK
       - name: Preparar Android SDK
         uses: android-actions/setup-android@v3
-        with:
-          packages: 'platform-tools'
 
-      - name: Extrair ZIP
+      - name: Instalar ferramentas Android
+        run: |
+          sdkmanager "platform-tools" "platforms;android-35" "build-tools;35.0.0"
+
+      # 5. Encontrar e extrair ZIP automaticamente
+      - name: Encontrar e extrair ZIP
+        shell: bash
         run: |
           mkdir -p extracted
-          unzip -q -o HarborPlay-Android.zip -d extracted
 
-      - name: Encontrar projeto
-        run: |
-          PKG=$(find extracted -path '*/mobile/package.json' -not -path '*/node_modules/*' | head -n 1)
-          if [ -z "$PKG" ]; then
-            echo "ERRO: mobile/package.json nao encontrado no ZIP"
+          ZIP_FILE=$(find . -maxdepth 5 -type f -iname "*.zip" \
+            -not -path "./.git/*" | head -n 1)
+
+          if [ -z "$ZIP_FILE" ]; then
+            echo "ERRO: Nenhum arquivo ZIP encontrado."
+            echo "Arquivos disponíveis:"
+            find . -maxdepth 4 -type f
             exit 1
           fi
-          APP=$(dirname "$PKG")
-          echo "APP=$APP" >> $GITHUB_ENV
 
-      - name: Instalar dependencias
+          echo "ZIP encontrado: $ZIP_FILE"
+
+          unzip -q "$ZIP_FILE" -d extracted
+
+          echo "Conteúdo extraído:"
+          find extracted -maxdepth 3 -type f | head -50
+
+      # 6. Encontrar projeto Expo
+      - name: Encontrar projeto
+        shell: bash
         run: |
-          cd "$APP"
-          npm install
-          npm install expo-asset@~11.0.1 expo-constants@~17.0.3 expo-font@~13.0.1
+          APP_DIR=""
 
+          while IFS= read -r -d '' FILE; do
+            if node -e "
+              const p = require(process.argv[1]);
+              process.exit(
+                p.dependencies?.expo ||
+                p.devDependencies?.expo ? 0 : 1
+              );
+            " "$FILE"; then
+              APP_DIR=$(dirname "$FILE")
+              break
+            fi
+          done < <(find extracted -type f \
+            -name package.json \
+            -not -path "*/node_modules/*" -print0)
+
+          if [ -z "$APP_DIR" ]; then
+            echo "ERRO: Projeto Expo não encontrado."
+            exit 1
+          fi
+
+          echo "Projeto encontrado: $APP_DIR"
+          echo "APP_DIR=$APP_DIR" >> "$GITHUB_ENV"
+
+      # 7. Instalar dependências
+      - name: Instalar dependências
+        run: |
+          cd "$APP_DIR"
+          npm install
+
+      # 8. Gerar projeto Android
       - name: Gerar projeto Android
         run: |
-          cd "$APP"
-          npx expo prebuild -p android --clean
+          cd "$APP_DIR"
+          npx expo prebuild --platform android --clean
 
-      - name: Forcar Kotlin 1.9.25
-        run: |
-          cd "$APP/android"
-          python3 - <<'PY'
-          p = "build.gradle"
-          s = open(p).read()
-          line = "  configurations.classpath.resolutionStrategy.force 'org.jetbrains.kotlin:kotlin-gradle-plugin:1.9.25'\n"
-          s = s.replace("buildscript {\n", "buildscript {\n" + line, 1)
-          open(p, "w").write(s)
-          PY
-          head -n 12 build.gradle
-
+      # 9. Compilar APK
       - name: Compilar APK
         run: |
-          cd "$APP/android"
+          cd "$APP_DIR/android"
           chmod +x gradlew
           ./gradlew assembleRelease --no-daemon
 
+      # 10. Disponibilizar APK
       - name: Disponibilizar APK
         uses: actions/upload-artifact@v4
         with:
-          name: Harpia-APK
-          path: ${{ env.APP }}/android/app/build/outputs/apk/release/*.apk
+          name: HarborPlay-APK
+          path: ${{ env.APP_DIR }}/android/app/build/outputs/apk/release/*.apk
           if-no-files-found: error
+          retention-days: 7
+
