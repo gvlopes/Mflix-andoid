@@ -1,1 +1,79 @@
+name: Gerar APK MXFlix
 
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Baixar projeto
+        uses: actions/checkout@v4
+
+      - name: Configurar Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Configurar Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Preparar Android SDK
+        uses: android-actions/setup-android@v3
+        with:
+          packages: 'platform-tools'
+
+      - name: Extrair ZIP
+        run: |
+          mkdir -p extracted
+          unzip -q -o MXFlix-Android.zip -d extracted
+
+      - name: Encontrar projeto
+        run: |
+          PKG=$(find extracted -path '*/mobile/package.json' -not -path '*/node_modules/*' | head -n 1)
+          if [ -z "$PKG" ]; then
+            echo "ERRO: mobile/package.json nao encontrado no ZIP"
+            exit 1
+          fi
+          APP=$(dirname "$PKG")
+          echo "APP=$APP" >> $GITHUB_ENV
+
+      - name: Instalar dependencias
+        run: |
+          cd "$APP"
+          npm install
+          npm install expo-asset@~11.0.1 expo-constants@~17.0.3 expo-font@~13.0.1
+
+      - name: Gerar projeto Android
+        run: |
+          cd "$APP"
+          npx expo prebuild -p android --clean
+
+      - name: Forcar Kotlin 1.9.25
+        run: |
+          cd "$APP/android"
+          python3 - <<'PY'
+          p = "build.gradle"
+          s = open(p).read()
+          line = "  configurations.classpath.resolutionStrategy.force 'org.jetbrains.kotlin:kotlin-gradle-plugin:1.9.25'\n"
+          s = s.replace("buildscript {\n", "buildscript {\n" + line, 1)
+          open(p, "w").write(s)
+          PY
+          head -n 12 build.gradle
+
+      - name: Compilar APK
+        run: |
+          cd "$APP/android"
+          chmod +x gradlew
+          ./gradlew assembleRelease --no-daemon
+
+      - name: Disponibilizar APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: MXFlix-APK
+          path: ${{ env.APP }}/android/app/build/outputs/apk/release/*.apk
+          if-no-files-found: error
