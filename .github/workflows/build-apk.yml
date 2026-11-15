@@ -39,21 +39,19 @@ jobs:
         run: |
           PKG=$(find extracted -path '*/mobile/package.json' -not -path '*/node_modules/*' | head -n 1)
           if [ -z "$PKG" ]; then
-            echo "ERRO: mobile/package.json não encontrado no ZIP"
-            find extracted -maxdepth 4 | head -50
+            echo "ERRO: mobile/package.json nao encontrado no ZIP"
             exit 1
           fi
           APP=$(dirname "$PKG")
           echo "APP=$APP" >> $GITHUB_ENV
-          echo "Projeto em: $APP"
 
-      - name: Instalar dependências
+      - name: Instalar dependencias
         run: |
           cd "$APP"
           npm install
           npm install expo-asset@~11.0.1 expo-constants@~17.0.3 expo-font@~13.0.1
 
-       - name: Compilar APK
+      - name: Compilar APK
         id: g1
         continue-on-error: true
         run: |
