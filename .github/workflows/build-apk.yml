@@ -1,5 +1,5 @@
 
-name: Gerar APK HarpiaPlay
+name: Gerar APK e AAB NinjaTV
 
 on:
   workflow_dispatch:
@@ -10,98 +10,107 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
+    timeout-minutes: 40
 
     steps:
-      # 1. Baixar projeto do GitHub
-      - name: Baixar projeto
+      - name: Baixar repositório
         uses: actions/checkout@v4
 
-      # 2. Configurar Java 17
-      - name: Configurar Java
+      - name: Configurar Java 17
         uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '17'
 
-      # 3. Configurar Android SDK
-      - name: Preparar Android SDK
-        uses: android-actions/setup-android@v4
+      - name: Configurar Android SDK
+        uses: android-actions/setup-android@v3
+        with:
+          packages: 'platform-tools platforms;android-35 build-tools;35.0.0'
 
-      # 4. Instalar ferramentas Android
-      - name: Instalar ferramentas Android
+      - name: Configurar Gradle 8.7
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.7'
+
+      - name: Localizar o projeto
         run: |
-          sdkmanager "platform-tools" \
-            "platforms;android-35" \
-            "build-tools;35.0.0"
-
-      # 5. Encontrar e extrair ZIP
-      - name: Extrair HarpiaPlay
-        shell: bash
-        run: |
-          mkdir -p extracted
-
-          ZIP_FILE=$(find . -maxdepth 5 -type f \
-            -iname "HarpiaPlay-Android.zip" \
-            -not -path "./.git/*" | head -n 1)
-
-          if [ -z "$ZIP_FILE" ]; then
-            echo "ERRO: HarpiaPlay-Android.zip não encontrado."
-            find . -maxdepth 4 -type f
-            exit 1
+          # Se o repositório tiver o NinjaTV-Android.zip na raiz, extrai; senão usa os arquivos do próprio repositório.
+          if [ -f NinjaTV-Android.zip ]; then
+            mkdir -p extracted
+            unzip -q -o NinjaTV-Android.zip -d extracted
+            SETTINGS=$(find extracted -name settings.gradle -not -path '*/node_modules/*' | head -n 1)
+          else
+            SETTINGS=$(find . -maxdepth 3 -name settings.gradle -not -path './.git/*' | head -n 1)
           fi
-
-          echo "Arquivo encontrado: $ZIP_FILE"
-
-          unzip -q "$ZIP_FILE" -d extracted
-
-      # 6. Localizar projeto Android
-      - name: Encontrar projeto Android
-        shell: bash
-        run: |
-          SETTINGS=$(find extracted -type f \
-            -name settings.gradle -print -quit)
-
           if [ -z "$SETTINGS" ]; then
-            echo "ERRO: settings.gradle não encontrado."
-            find extracted -maxdepth 4 -type f
+            echo "ERRO: settings.gradle não encontrado. Envie o NinjaTV-Android.zip (ou os arquivos do projeto) para a raiz do repositório."
             exit 1
           fi
-
-          APP_DIR=$(dirname "$SETTINGS")
-
-          if [ ! -f "$APP_DIR/app/build.gradle" ]; then
-            echo "ERRO: app/build.gradle não encontrado."
-            exit 1
-          fi
-
-          echo "Projeto localizado: $APP_DIR"
+          APP_DIR=$(cd "$(dirname "$SETTINGS")" && pwd)
           echo "APP_DIR=$APP_DIR" >> "$GITHUB_ENV"
+          echo "Projeto encontrado em: $APP_DIR"
+          ls "$APP_DIR"
 
-      # 7. Preparar Gradle
-      - name: Preparar Gradle
+      - name: Mostrar URL do painel configurada
         run: |
-          cd "$APP_DIR"
-          chmod +x gradlew
+          echo "app-config.json:"
+          cat "$APP_DIR/app/src/main/assets/app-config.json" || true
+          grep -n "PANEL_URL" "$APP_DIR/app/build.gradle" || true
 
-      # 8. Compilar APK Debug assinado
-      - name: Compilar APK
+      - name: Compilar APK de teste (debug)
+        working-directory: ${{ env.APP_DIR }}
+        run: gradle assembleDebug --no-daemon --stacktrace
+
+      - name: Publicar APK de teste
+        uses: actions/upload-artifact@v4
+        with:
+          name: NinjaTV-APK-teste
+          path: ${{ env.APP_DIR }}/app/build/outputs/apk/debug/*.apk
+          if-no-files-found: error
+
+      # ---- Release assinado (APK + AAB para a Play Store): só roda se você cadastrar os 4 segredos abaixo ----
+      - name: Verificar assinatura de release
+        id: assinatura
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
         run: |
-          cd "$APP_DIR"
-          ./gradlew clean assembleDebug --no-daemon
-
-      # 9. Verificar APK
-      - name: Verificar APK
-        run: |
-          APK="$APP_DIR/app/build/outputs/apk/debug/app-debug.apk"
-
-          if [ ! -f "$APK" ]; then
-            echo "ERRO: APK não foi gerado."
-            find "$APP_DIR/app/build/outputs" -type f
-            exit 1
+          if [ -n "$KEYSTORE_BASE64" ] && [ -n "$KEYSTORE_PASSWORD" ] && [ -n "$KEY_ALIAS" ] && [ -n "$KEY_PASSWORD" ]; then
+            echo "$KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/release.jks"
+            {
+              echo "storeFile=$RUNNER_TEMP/release.jks"
+              echo "storePassword=$KEYSTORE_PASSWORD"
+              echo "keyAlias=$KEY_ALIAS"
+              echo "keyPassword=$KEY_PASSWORD"
+            } > "$APP_DIR/keystore.properties"
+            echo "assinar=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "assinar=false" >> "$GITHUB_OUTPUT"
+            echo "Segredos de assinatura não cadastrados: gerando só o APK de teste."
           fi
 
-          echo "APK gerado com sucesso!"
-          ls -lh "$APK"
+      - name: Compilar release assinado (APK e AAB)
+        if: steps.assinatura.outputs.assinar == 'true'
+        working-directory: ${{ env.APP_DIR }}
+        run: gradle assembleRelease bundleRelease --no-daemon --stacktrace
+
+      - name: Publicar APK de release
+        if: steps.assinatura.outputs.assinar == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: NinjaTV-APK-release
+          path: ${{ env.APP_DIR }}/app/build/outputs/apk/release/*.apk
+          if-no-files-found: error
+
+      - name: Publicar AAB (Play Store)
+        if: steps.assinatura.outputs.assinar == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: NinjaTV-AAB
+          path: ${{ env.APP_DIR }}/app/build/outputs/bundle/release/*.aab
+          if-no-files-found: error
 
       # 10. Disponibilizar APK
       - name: Disponibilizar APK
